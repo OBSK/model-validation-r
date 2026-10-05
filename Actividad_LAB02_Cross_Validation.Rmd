@@ -1,0 +1,517 @@
+---
+title: "Actividad LAB02 - Cross Validation"
+author: "Jorge Arturo Huima Ruiz"
+date: "2026-10-04"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Introducción
+
+Para esta actividad voy a partir de la práctica LAB02 de Cross Validation.
+
+Voy a seguir trabajando con el dataset `Auto` y con el modelo lineal que relaciona el peso del coche (`weight`) con la potencia (`horsepower`).
+
+La idea de la tarea es ampliar un poco lo que ya se hizo en la práctica. Por un lado, además de mirar errores como MAE o RMSE, voy a comparar también si la distribución de los valores predichos se parece a la de los valores reales.
+
+Por otro lado, voy a probar distintos valores de K en la validación cruzada y repetir el proceso varias veces para ver cómo cambia el error y si hay más o menos variabilidad dependiendo del número de folds.
+
+# Preparación de los datos
+
+Primero cargo las librerías y el dataset que se utiliza en la práctica.
+
+```{r carga-datos}
+library(ISLR)
+library(caret)
+
+data(Auto)
+
+str(Auto)
+```
+
+Como en la práctica original, convierto el peso de libras a kilogramos.
+
+También cambio la variable `origin` para trabajar con los nombres de los grupos.
+
+```{r preparacion}
+Auto$weight <- Auto$weight * 0.453592
+
+Auto$origin <- as.character(
+  factor(
+    Auto$origin,
+    labels = c("American", "Japanese", "European")
+  )
+)
+
+america <- Auto[Auto$origin == "American", ]
+japan <- Auto[Auto$origin == "Japanese", ]
+europe <- Auto[Auto$origin == "European", ]
+
+nrow(america)
+nrow(japan)
+nrow(europe)
+```
+
+# Funciones de error
+
+Uso las mismas funciones de error que se encuentran en la práctica.
+
+```{r funciones-error}
+mae <- function(obs, est) {
+  mean(abs(obs - est))
+}
+
+rmse <- function(obs, est) {
+  sqrt(mean((obs - est)^2))
+}
+```
+
+# Tarea 1.1
+
+En la práctica anterior se utilizan medidas como MAE y RMSE.
+
+Estas medidas sirven para ver cuánto se aleja cada predicción de su valor real.
+
+En esta parte quiero añadir otra forma de comprobar el modelo, comparando no solamente cada valor por separado, sino también la forma general de la distribución de los datos observados y los predichos.
+
+## Modelo con los coches americanos
+
+Primero creo el modelo utilizando los coches americanos.
+
+```{r modelo-america}
+modelo_america <- lm(
+  weight ~ horsepower,
+  data = america
+)
+
+summary(modelo_america)
+```
+
+## Predicción para los coches europeos
+
+Uso el modelo anterior para estimar el peso de los coches europeos.
+
+```{r pred-europa}
+pred_europe <- predict(
+  modelo_america,
+  newdata = europe
+)
+```
+
+Calculo los errores.
+
+```{r errores-europa}
+rmse_europe <- rmse(
+  europe$weight,
+  pred_europe
+)
+
+mae_europe <- mae(
+  europe$weight,
+  pred_europe
+)
+
+rmse_europe
+mae_europe
+```
+
+## Predicción para los coches japoneses
+
+Ahora hago lo mismo con los coches japoneses.
+
+```{r pred-japon}
+pred_japan <- predict(
+  modelo_america,
+  newdata = japan
+)
+```
+
+```{r errores-japon}
+rmse_japan <- rmse(
+  japan$weight,
+  pred_japan
+)
+
+mae_japan <- mae(
+  japan$weight,
+  pred_japan
+)
+
+rmse_japan
+mae_japan
+```
+
+# Comparación de las distribuciones
+
+Para ver si los valores predichos tienen una distribución parecida a los reales, primero hago una comparación gráfica.
+
+## Europa
+
+```{r densidad-europa, fig.width=7, fig.height=5}
+plot(
+  density(europe$weight),
+  main = "Europa: valores reales y predichos",
+  xlab = "Peso (kg)",
+  ylab = "Densidad",
+  lwd = 2
+)
+
+lines(
+  density(pred_europe),
+  lwd = 2,
+  lty = 2
+)
+
+legend(
+  "topright",
+  legend = c("Real", "Predicho"),
+  lty = c(1, 2),
+  lwd = 2
+)
+```
+
+## Japón
+
+```{r densidad-japon, fig.width=7, fig.height=5}
+plot(
+  density(japan$weight),
+  main = "Japón: valores reales y predichos",
+  xlab = "Peso (kg)",
+  ylab = "Densidad",
+  lwd = 2
+)
+
+lines(
+  density(pred_japan),
+  lwd = 2,
+  lty = 2
+)
+
+legend(
+  "topright",
+  legend = c("Real", "Predicho"),
+  lty = c(1, 2),
+  lwd = 2
+)
+```
+
+Además de los gráficos, también voy a utilizar el test de Kolmogorov-Smirnov para comparar las distribuciones.
+
+```{r ks-test}
+ks_europe <- ks.test(
+  europe$weight,
+  pred_europe
+)
+
+ks_japan <- ks.test(
+  japan$weight,
+  pred_japan
+)
+
+ks_europe
+ks_japan
+```
+
+Para resumir los resultados, los junto en una tabla.
+
+```{r tabla-1-1}
+resultados_1_1 <- data.frame(
+  Conjunto = c("Europa", "Japón"),
+
+  RMSE = c(
+    rmse_europe,
+    rmse_japan
+  ),
+
+  MAE = c(
+    mae_europe,
+    mae_japan
+  ),
+
+  KS_D = c(
+    unname(ks_europe$statistic),
+    unname(ks_japan$statistic)
+  ),
+
+  KS_p_value = c(
+    ks_europe$p.value,
+    ks_japan$p.value
+  )
+)
+
+resultados_1_1
+```
+
+## Comentario de la Tarea 1.1
+
+Viendo los resultados, el modelo entrenado con los coches americanos se comporta algo mejor al predecir los coches japoneses que los europeos. Para Europa he obtenido un RMSE de 236.27 y un MAE de 225.09, mientras que para Japón los valores son algo menores, con un RMSE de 221.23 y un MAE de 200.82.  
+Al comparar las distribuciones con el test de Kolmogorov-Smirnov, los p-values son muy inferiores a 0.05 en los dos casos. Por tanto, hay evidencia de que las distribuciones de los valores predichos y observados son diferentes tanto para Europa como para Japón.  
+También se observa que el estadístico KS es mayor para Europa (0.658) que para Japón (0.471), por lo que las predicciones realizadas sobre los coches japoneses se aproximan algo más a la distribución real.  
+En este caso, las dos formas de evaluación llevan a una conclusión parecida: el modelo no generaliza especialmente bien cuando se aplica a coches de otros orígenes, aunque el resultado es algo mejor para los coches japoneses. MAE y RMSE indican el error de cada predicción, mientras que el test KS aporta información sobre el comportamiento global de la distribución. Por eso ambas medidas se complementan.
+
+# Tarea 1.2
+
+En esta parte voy a probar distintos valores de K para la validación cruzada.
+
+Voy a utilizar:
+
+- K = 2
+- K = 5
+- K = 10
+
+La idea es repetir cada validación varias veces porque el resultado puede cambiar dependiendo de cómo se dividan los datos en los folds.
+
+## Función para hacer Cross Validation
+
+Creo una función que hace la validación k-fold y devuelve el RMSE total.
+
+```{r funcion-cv}
+cv_rmse <- function(data, k, seed) {
+
+  set.seed(seed)
+
+  folds <- createFolds(
+    data$weight,
+    k = k,
+    list = TRUE,
+    returnTrain = FALSE
+  )
+
+  observados <- c()
+  predichos <- c()
+
+  for (i in seq_along(folds)) {
+
+    test_idx <- folds[[i]]
+
+    train_data <- data[-test_idx, ]
+    test_data <- data[test_idx, ]
+
+    modelo <- lm(
+      weight ~ horsepower,
+      data = train_data
+    )
+
+    pred <- predict(
+      modelo,
+      newdata = test_data
+    )
+
+    observados <- c(
+      observados,
+      test_data$weight
+    )
+
+    predichos <- c(
+      predichos,
+      pred
+    )
+  }
+
+  rmse(
+    observados,
+    predichos
+  )
+}
+```
+
+Primero hago una prueba simple con cada valor de K.
+
+```{r prueba-cv}
+cv_rmse(europe, 2, 1)
+cv_rmse(europe, 5, 1)
+cv_rmse(europe, 10, 1)
+```
+
+## Repetir varias veces la validación
+
+Voy a repetir el proceso 50 veces para cada valor de K.
+
+Cada vez cambio la semilla para obtener una partición diferente.
+
+```{r repetir-cv}
+repeticiones <- 50
+
+errores_k2 <- sapply(
+  1:repeticiones,
+  function(i) {
+    cv_rmse(europe, 2, i)
+  }
+)
+
+errores_k5 <- sapply(
+  1:repeticiones,
+  function(i) {
+    cv_rmse(europe, 5, i)
+  }
+)
+
+errores_k10 <- sapply(
+  1:repeticiones,
+  function(i) {
+    cv_rmse(europe, 10, i)
+  }
+)
+```
+
+# Resumen de resultados
+
+Ahora calculo el error medio y la desviación estándar para cada K.
+
+La desviación estándar me sirve para ver cuánto cambia el error entre una repetición y otra.
+
+```{r resumen-1-2}
+resultados_1_2 <- data.frame(
+  K = c(2, 5, 10),
+
+  RMSE_medio = c(
+    mean(errores_k2),
+    mean(errores_k5),
+    mean(errores_k10)
+  ),
+
+  Desviacion = c(
+    sd(errores_k2),
+    sd(errores_k5),
+    sd(errores_k10)
+  ),
+
+  Minimo = c(
+    min(errores_k2),
+    min(errores_k5),
+    min(errores_k10)
+  ),
+
+  Maximo = c(
+    max(errores_k2),
+    max(errores_k5),
+    max(errores_k10)
+  )
+)
+
+resultados_1_2
+```
+
+## Boxplot
+
+Para verlo mejor hago un boxplot con los errores de las 50 repeticiones.
+
+```{r boxplot-k, fig.width=7, fig.height=5}
+errores <- data.frame(
+  RMSE = c(
+    errores_k2,
+    errores_k5,
+    errores_k10
+  ),
+
+  K = factor(
+    rep(
+      c(2, 5, 10),
+      each = repeticiones
+    )
+  )
+)
+
+boxplot(
+  RMSE ~ K,
+  data = errores,
+  xlab = "Valor de K",
+  ylab = "RMSE",
+  main = "Variabilidad del error según K"
+)
+```
+
+## Variación del error en las repeticiones
+
+También represento el error de cada repetición para ver cómo va cambiando.
+
+```{r repeticiones-grafico, fig.width=8, fig.height=5}
+plot(
+  errores_k2,
+  type = "l",
+  ylim = range(
+    c(
+      errores_k2,
+      errores_k5,
+      errores_k10
+    )
+  ),
+  xlab = "Repetición",
+  ylab = "RMSE",
+  main = "RMSE en las distintas repeticiones"
+)
+
+lines(
+  errores_k5,
+  lty = 2
+)
+
+lines(
+  errores_k10,
+  lty = 3
+)
+
+legend(
+  "topright",
+  legend = c(
+    "K = 2",
+    "K = 5",
+    "K = 10"
+  ),
+  lty = c(
+    1,
+    2,
+    3
+  )
+)
+```
+
+## Comparación de la desviación estándar
+
+```{r desviacion-grafico, fig.width=7, fig.height=5}
+plot(
+  resultados_1_2$K,
+  resultados_1_2$Desviacion,
+  type = "b",
+  pch = 16,
+  xlab = "Valor de K",
+  ylab = "Desviación estándar del RMSE",
+  main = "Variabilidad según el número de folds"
+)
+```
+
+# Comparación con el paper
+
+Al repetir 50 veces la validación cruzada se observa que el RMSE medio no cambia demasiado entre los diferentes valores de K. Para K=2 he obtenido un RMSE medio de 73.84, para K=5 un valor de 73.15 y para K=10 un valor de 73.11.
+
+La diferencia más importante aparece al analizar la variabilidad. Con K=2 la desviación estándar del RMSE es 2.19, mientras que con K=5 baja a 0.61 y con K=10 a 0.40. Por tanto, en este experimento las particiones con K=2 producen resultados bastante menos estables.
+
+Esto también se puede observar en los valores mínimo y máximo. Con K=2 los resultados van aproximadamente desde 71.88 hasta 82.95, mientras que con K=10 se encuentran en un intervalo mucho más pequeño, entre 72.29 y 74.02.
+
+Los resultados obtenidos siguen la misma tendencia que la observada por Kohavi. En el artículo se muestra que la validación cruzada con 2 folds puede presentar una varianza elevada, mientras que valores moderados de K tienen un comportamiento más estable.
+
+Por tanto, para este conjunto de datos los resultados son coherentes con las conclusiones del paper, siendo K=10 el valor que ha producido la estimación más estable. De todas formas, hay que tener en cuenta que Kohavi trabaja principalmente con problemas de clasificación y accuracy, mientras que en esta práctica estoy trabajando con una regresión lineal y utilizando RMSE como medida de error.
+
+# Conclusiones
+
+Con esta actividad he podido comprobar que evaluar un modelo únicamente con una medida de error no da toda la información. MAE y RMSE permiten conocer el error de las predicciones, mientras que la comparación de distribuciones permite ver si el comportamiento general de los datos predichos se parece al de los valores reales.
+
+También he comprobado que el número de folds influye especialmente en la estabilidad de la validación. En mi caso, K=2 ha presentado bastante más variabilidad, mientras que K=5 y sobre todo K=10 han producido resultados mucho más estables.
+
+Por este motivo, de los tres valores probados, K=10 sería el que elegiría para este experimento.
+
+# Información de la sesión
+
+```{r session-info}
+sessionInfo()
+```
